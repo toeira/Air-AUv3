@@ -37,7 +37,7 @@ final class AirViewController: AUViewController, AUAudioUnitFactory {
             let row = UIStackView(); row.axis = .horizontal; row.spacing = 12
             let label = UILabel(); label.textColor = .white; label.font = .systemFont(ofSize: 13)
             label.widthAnchor.constraint(equalToConstant: 165).isActive = true
-            let slider = UISlider(); slider.tag = index; slider.tintColor = .systemTeal
+            let slider = UISlider(); slider.tag = index; slider.tintColor = UIColor(red: 48.0/255.0, green: 195.0/255.0, blue: 216.0/255.0, alpha: 1)
             slider.minimumValue = [-120, -100, -12, 0, -12][index]
             slider.maximumValue = [0, 100, 12, 1, 12][index]
             slider.value = [-100, 0, 0, 0, 0][index]
