@@ -1,0 +1,12 @@
+44100 Hz 1 channels: finite output, energy=1961.88, latency=2048 samples
+44100 Hz 2 channels: finite output, energy=3874.78, latency=2048 samples
+48000 Hz 1 channels: finite output, energy=1992.45, latency=2048 samples
+48000 Hz 2 channels: finite output, energy=3956.23, latency=2048 samples
+96000 Hz 1 channels: finite output, energy=2189.55, latency=4096 samples
+96000 Hz 2 channels: finite output, energy=4373.76, latency=4096 samples
+440 Hz amplitude: both=0.199716, air=0.00266965, harmonic=0.197046
+
+Additional checks: shell script syntax; YAML parsing and source paths;
+AUv3 bundle validator positive and negative fixtures.
+
+Not executed: Apple SDK compilation, device installation, AUM host validation.

@@ -1,0 +1,12 @@
+cmake_minimum_required(VERSION 3.16)
+project(AirDSP LANGUAGES C CXX)
+set(CMAKE_CXX_STANDARD 17)
+file(GLOB BL_SOURCES Sources/DSP/BlueLab/*.cpp)
+add_library(air_dsp STATIC ${BL_SOURCES} Sources/DSP/WDL/fft.c Sources/DSP/BlueLab/fast-dct-lee.c Sources/DSP/AirEngine.cpp)
+target_include_directories(air_dsp PUBLIC Sources/DSP/Compat Sources/DSP/BlueLab Sources/DSP/WDL Sources/DSP)
+target_compile_definitions(air_dsp PUBLIC WDL_FFT_REALSIZE=8)
+
+add_executable(dsp_smoke tests/dsp_smoke.cpp)
+target_link_libraries(dsp_smoke PRIVATE air_dsp)
+enable_testing()
+add_test(NAME dsp_smoke COMMAND dsp_smoke)

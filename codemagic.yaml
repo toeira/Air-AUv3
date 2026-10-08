@@ -1,0 +1,31 @@
+workflows:
+  air-auv3-unsigned:
+    name: Air AUv3 - IPA para assinatura local
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      xcode: latest
+    scripts:
+      - name: Verificar processamento original do Air
+        script: bash scripts/test_dsp.sh
+      - name: Gerar projeto Xcode
+        script: |
+          set -euo pipefail
+          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+          xcodegen generate --spec project.yml
+      - name: Compilar app e extensão AUv3
+        script: |
+          set -euo pipefail
+          mkdir -p build
+          xcodebuild -project Air.xcodeproj -scheme AirApp \
+            -configuration Release -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
+            build 2>&1 | tee build/xcodebuild.log
+      - name: Empacotar IPA com a extensão
+        script: bash scripts/package_ipa.sh
+    artifacts:
+      - build/Air_AUv3_unsigned.ipa
+      - build/xcodebuild.log
+      - Config/*.plist
