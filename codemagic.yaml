@@ -1,71 +1,67 @@
 workflows:
   air-auv3-unsigned:
-    name: Air AUv3 - iOS 12 AppSync (assinatura ad hoc)
+    name: Air AUv3 - IPA para assinatura local
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
       xcode: latest
     scripts:
-      - name: Verificar processamento original do Air
-        script: bash scripts/test_dsp.sh
-      - name: Gerar projeto Xcode
-        script: |
-          set -euo pipefail
-          if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
-          xcodegen generate --spec project.yml
-      - name: Compilar app e extensão AUv3
-        script: |
-          set -euo pipefail
-          mkdir -p build
-          xcodebuild -project Air.xcodeproj -scheme AirApp \
-            -configuration Release -sdk iphoneos \
-            -destination 'generic/platform=iOS' \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
-            build 2>&1 | tee build/xcodebuild.log
-      - name: Empacotar IPA com a extensão
-        script: bash scripts/package_ipa.sh
-      - name: Assinar ad hoc app e AUv3 para AppSync
-        script: |
-          set -euo pipefail
-          IPA="build/Air_AUv3_unsigned.ipa"
-          OUT="build/Air_AUv3_iOS12_AppSync.ipa"
-          TMP="$(mktemp -d)"
-          trap 'rm -rf "$TMP"' EXIT
-          unzip -q "$IPA" -d "$TMP"
-          APP="$(find "$TMP/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
-          test -n "$APP" || { echo 'ERRO: Payload/*.app não encontrado'; exit 1; }
-          export AIR_APP="$APP" AIR_TMP="$TMP"
-          python3 - <<'PY'
-          import os, plistlib, pathlib
-          app = pathlib.Path(os.environ['AIR_APP'])
-          tmp = pathlib.Path(os.environ['AIR_TMP'])
-          bundles = sorted(app.rglob('*.appex'), key=lambda p: len(p.parts), reverse=True) + [app]
-          with (tmp / 'bundles.txt').open('w') as listing:
-              for i, bundle in enumerate(bundles):
-                  with (bundle / 'Info.plist').open('rb') as f:
-                      info = plistlib.load(f)
-                  bid = info['CFBundleIdentifier']
-                  ent = {'application-identifier': 'APPST00000.' + bid,
-                         'com.apple.developer.team-identifier': 'APPST00000',
-                         'get-task-allow': True}
-                  path = tmp / ('entitlements_%d.plist' % i)
-                  with path.open('wb') as f:
-                      plistlib.dump(ent, f)
-                  listing.write(str(bundle) + '\t' + str(path) + '\n')
-                  print('Preparado:', bid)
-          PY
-          while IFS="$(printf '\t')" read -r BUNDLE ENTS; do
-            codesign --force --sign - --entitlements "$ENTS" "$BUNDLE"
-            codesign --verify --verbose=2 "$BUNDLE"
-            codesign -d --entitlements :- "$BUNDLE" 2>&1 | grep -q 'application-identifier' || {
-              echo "ERRO: entitlement ausente em $BUNDLE"; exit 1;
-            }
-          done < "$TMP/bundles.txt"
-          ditto -c -k --keepParent "$TMP/Payload" "$OUT"
-          echo "IPA criado: $OUT"
+    - name: Verificar processamento original do Air
+      script: bash scripts/test_dsp.sh
+    - name: Gerar projeto Xcode
+      script: |
+        set -euo pipefail
+        if ! command -v xcodegen >/dev/null; then brew install xcodegen; fi
+        xcodegen generate --spec project.yml
+    - name: Compilar app e extensão AUv3
+      script: |
+        set -euo pipefail
+        mkdir -p build
+        xcodebuild -project Air.xcodeproj -scheme AirApp \
+          -configuration Release -sdk iphoneos \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath build/DerivedData \
+          CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY='' \
+          build 2>&1 | tee build/xcodebuild.log
+    - name: Empacotar IPA com a extensão
+      script: bash scripts/package_ipa.sh
+    - name: Assinar ad hoc e empacotar para iOS 12 AppSync
+      script: |
+        set -euo pipefail
+        IPA="build/Air_AUv3_unsigned.ipa"
+        OUT="$PWD/build/Air_AUv3_iOS12-AppSync.ipa"
+        TMP="$(mktemp -d)"
+        trap 'rm -rf "$TMP"' EXIT
+        unzip -q "$IPA" -d "$TMP"
+        APP="$(find "$TMP/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+        test -n "$APP"
+        export NF_APP="$APP" NF_TMP="$TMP"
+        python3 - <<'SIGNPY'
+        import os, plistlib, pathlib, subprocess
+        app=pathlib.Path(os.environ['NF_APP']);tmp=pathlib.Path(os.environ['NF_TMP'])
+        # Sign nested libraries/frameworks first, then extensions, then the main app.
+        internal=sorted([p for p in app.rglob('*') if p.suffix in ('.framework','.dylib')],key=lambda p:len(p.parts),reverse=True)
+        for p in internal:
+            subprocess.run(['codesign','--force','--sign','-',str(p)],check=True)
+        bundles=sorted(app.rglob('*.appex'),key=lambda p:len(p.parts),reverse=True)+[app]
+        for i,bundle in enumerate(bundles):
+            with (bundle/'Info.plist').open('rb') as f:info=plistlib.load(f)
+            version=tuple(map(int,info.get('MinimumOSVersion','999').split('.')))
+            assert version <= (12,5,7), 'MinimumOSVersion incompatible with iOS 12.5.7'
+            bid=info['CFBundleIdentifier']
+            ent={'application-identifier':'APPST00000.'+bid,'com.apple.developer.team-identifier':'APPST00000','get-task-allow':True}
+            path=tmp/('entitlements_%d.plist'%i)
+            with path.open('wb') as f:plistlib.dump(ent,f)
+            subprocess.run(['codesign','--force','--sign','-','--entitlements',str(path),str(bundle)],check=True)
+            subprocess.run(['codesign','--verify','--verbose=2',str(bundle)],check=True)
+            result=subprocess.run(['codesign','-d','--entitlements',':-',str(bundle)],capture_output=True,check=True)
+            assert b'application-identifier' in result.stdout+result.stderr
+        SIGNPY
+        rm -f "$OUT"
+        ditto -c -k --keepParent "$TMP/Payload" "$OUT"
+        echo "IPA criado: $OUT"
     artifacts:
-      - build/Air_AUv3_iOS12_AppSync.ipa
-      - build/Air_AUv3_unsigned.ipa
-      - build/xcodebuild.log
-      - Config/*.plist
+    - build/Air_AUv3_iOS12-AppSync.ipa
+    - build/Air_AUv3_unsigned.ipa
+    - build/xcodebuild.log
+    - Config/*.plist
