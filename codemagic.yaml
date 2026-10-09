@@ -1,6 +1,6 @@
 workflows:
   air-auv3-unsigned:
-    name: Air AUv3 - IPA para assinatura local
+    name: Air AUv3 - iOS 12 AppSync (assinatura ad hoc)
     max_build_duration: 60
     instance_type: mac_mini_m2
     environment:
@@ -25,7 +25,47 @@ workflows:
             build 2>&1 | tee build/xcodebuild.log
       - name: Empacotar IPA com a extensão
         script: bash scripts/package_ipa.sh
+      - name: Assinar ad hoc app e AUv3 para AppSync
+        script: |
+          set -euo pipefail
+          IPA="build/Air_AUv3_unsigned.ipa"
+          OUT="build/Air_AUv3_iOS12_AppSync.ipa"
+          TMP="$(mktemp -d)"
+          trap 'rm -rf "$TMP"' EXIT
+          unzip -q "$IPA" -d "$TMP"
+          APP="$(find "$TMP/Payload" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$APP" || { echo 'ERRO: Payload/*.app não encontrado'; exit 1; }
+          export AIR_APP="$APP" AIR_TMP="$TMP"
+          python3 - <<'PY'
+          import os, plistlib, pathlib
+          app = pathlib.Path(os.environ['AIR_APP'])
+          tmp = pathlib.Path(os.environ['AIR_TMP'])
+          bundles = sorted(app.rglob('*.appex'), key=lambda p: len(p.parts), reverse=True) + [app]
+          with (tmp / 'bundles.txt').open('w') as listing:
+              for i, bundle in enumerate(bundles):
+                  with (bundle / 'Info.plist').open('rb') as f:
+                      info = plistlib.load(f)
+                  bid = info['CFBundleIdentifier']
+                  ent = {'application-identifier': 'APPST00000.' + bid,
+                         'com.apple.developer.team-identifier': 'APPST00000',
+                         'get-task-allow': True}
+                  path = tmp / ('entitlements_%d.plist' % i)
+                  with path.open('wb') as f:
+                      plistlib.dump(ent, f)
+                  listing.write(str(bundle) + '\t' + str(path) + '\n')
+                  print('Preparado:', bid)
+          PY
+          while IFS="$(printf '\t')" read -r BUNDLE ENTS; do
+            codesign --force --sign - --entitlements "$ENTS" "$BUNDLE"
+            codesign --verify --verbose=2 "$BUNDLE"
+            codesign -d --entitlements :- "$BUNDLE" 2>&1 | grep -q 'application-identifier' || {
+              echo "ERRO: entitlement ausente em $BUNDLE"; exit 1;
+            }
+          done < "$TMP/bundles.txt"
+          ditto -c -k --keepParent "$TMP/Payload" "$OUT"
+          echo "IPA criado: $OUT"
     artifacts:
+      - build/Air_AUv3_iOS12_AppSync.ipa
       - build/Air_AUv3_unsigned.ipa
       - build/xcodebuild.log
       - Config/*.plist
